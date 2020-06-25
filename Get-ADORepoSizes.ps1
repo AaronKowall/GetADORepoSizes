@@ -10,7 +10,7 @@ function Invoke-RestCommand {
         [string]$uri,
         [string]$commandType,
         [string]$contentType = "application/json",
-        [string]$jsonBody,
+        $jsonBody,
         [string]$personalAccessToken
     )
 	
@@ -129,16 +129,31 @@ function Get-TFVCRepoSize {
             $binaryFiles++
 
             $changesets = Get-TFVCItemChangesets -collectionUrl $collectionUrl -personalAccessToken $personalAccessToken -path $item.path -fileName
+
+            $body = @{ "itemDescriptors" = @() }
+
             foreach ($changeset in $changesets) {
                 # The fact the file participated in changeset doesn't mean it's size has changed. (eg: deletion), but its a fair approximantion
-                $itemSize = Get-TFVCItemSize -collectionUrl $collectionUrl -personalAccessToken $personalAccessToken -path $item.path -fileName $item.fileName -version $changeset.changesetId
-                $binarySize = $binarySize + $itemSize
-                $binaryRevisions++;
-
+                
+                $body.itemDescriptors += @{ 
+                    "path" = $item.path
+                    "version"=  $changeset.changesetId
+                    "versionType" = "changeset"
+                }
             }
-            $binarySize = $binarySize + $item.size
-            $repoSize = $repoSize + $item.size
 
+            $uri = "$($collectionUrl)/_apis/tfvc/itembatch?api-version=5.1"
+
+            $bodyJson = ConvertTo-Json $body -compress            
+
+            $itemsBatch = Invoke-RestCommand -uri $uri -commandType "POST" -personalAccessToken $personalAccessToken -jsonBody $bodyJson -ContentType "application/json; charset=utf-8"
+
+            foreach($itemFromBatch in $itemsBatch) {
+                $binarySize = $binarySize + $itemFromBatch.size
+                $binaryRevisions++;
+            }
+        
+            $repoSize = $repoSize + $item.size
         }
         else {
             #text file
@@ -192,9 +207,8 @@ function Get-TFVCItemsize {
     return $item.size
 }
 
-# $CollectionUrl = 
-
-# $PersonalAccessToken = 
+# $CollectionUrl = "" 
+# $PersonalAccessToken = ""
 
 $CollectionUrl = $CollectionUrl.TrimEnd("/")
 
