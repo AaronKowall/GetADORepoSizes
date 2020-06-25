@@ -136,7 +136,6 @@ function Get-TFVCRepoSize {
                 $binaryRevisions++;
 
             }
-            $binarySize = $binarySize + $item.size
             $repoSize = $repoSize + $item.size
 
         }
