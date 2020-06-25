@@ -1,4 +1,4 @@
-﻿Param
+﻿Param 
 (
     [string]$CollectionUrl,
     [string]$ProjectName,
@@ -14,9 +14,11 @@ function Invoke-RestCommand {
         [string]$personalAccessToken
     )
 	
-    if ($jsonBody -ne $null) {
-        $jsonBody = $jsonBody.Replace("{{","{").Replace("}}","}")
+    if ($null -ne $jsonBody) {
+        $jsonBody = $jsonBody.Replace("{{", "{").Replace("}}", "}")
     }
+
+    Write-Debug "REST CALL Url $uri"
 
     try {
         if ([String]::IsNullOrEmpty($personalAccessToken)) {
@@ -37,19 +39,19 @@ function Invoke-RestCommand {
             }
         }
 
-	    if ($response.count) {
-		    $response = $response.value
-	    }
+        if ($response.count) {
+            $response = $response.value
+        }
 
-	    foreach ($r in $response) {
-		    if ($r.code -eq "400" -or $r.code -eq "403" -or $r.code -eq "404" -or $r.code -eq "409" -or $r.code -eq "500") {
+        foreach ($r in $response) {
+            if ($r.code -eq "400" -or $r.code -eq "403" -or $r.code -eq "404" -or $r.code -eq "409" -or $r.code -eq "500") {
                 Write-Error $_
-			    Write-Error -Message "Problem occurred when trying to call rest method."
-			    ConvertFrom-Json $r.body | Format-List
-		    }
-	    }
+                Write-Error -Message "Problem occurred when trying to call rest method."
+                ConvertFrom-Json $r.body | Format-List
+            }
+        }
 
-	    return $response
+        return $response
     }
     catch {
         $result = $_.Exception.Response.GetResponseStream()
@@ -61,7 +63,7 @@ function Invoke-RestCommand {
         Write-Error $responseBody
         Write-Error $_
         Write-Error -Message "Exception thrown calling REST method."
-	}
+    }
 }
 
 function Get-Projects {
@@ -102,33 +104,51 @@ function Get-TFVCRepoSize {
         [string]$personalAccessToken
     )
 
+    # This API doesn't returned deleted items
+    # Recursion level full may be too much into large repos and perhaps we should done one level and then recurse on folders
+
     $uri = "$($collectionUrl)/_apis/tfvc/items?scopePath=$/&recursionLevel=Full&api-version=5.1"
+
+    # TO get values by project change to
+    $encodedProjectName = [System.Web.HTTPUtility]::UrlEncode($projectName)
+    $uri = "$($collectionUrl)/_apis/tfvc/items?scopePath=$/$($encodedProjectName)&recursionLevel=Full&api-version=5.1"
+
 
     $items = Invoke-RestCommand -uri $uri -commandType "GET" -personalAccessToken $personalAccessToken
     $repoSize = 0
     $binarySize = 0
 
-    foreach ($item in $items)
-    {
-        if (($item.IsFolder -ne $true) -and ($item.encoding -eq -1))
-        {
+    $binaryRevisions = 0
+    $binaryFiles = 0
 
- #           $changesets = Get-TFVCItemChangesets -collectionUrl $collectionUrl -personalAccessToken $personalAccessToken -path $item.path -fileName
- #           foreach ($changeset in $changesets)
- #           {
- #               $itemSize = Get-TFVCItemSize -collectionUrl $collectionUrl -personalAccessToken $personalAccessToken -path $item.path -fileName $item.fileName -version $changeset.changesetId
- #               $binarySize = $binarySize + $itemSize
- #           }
+    foreach ($item in $items) {
+        Write-Debug "Binary= $item"
+
+        # A binary file is a file > 16MB that doesn't uses diffing. 
+        if (($item.IsFolder -ne $true) -and ($item.encoding -eq -1)) {
+            $binaryFiles++
+
+            $changesets = Get-TFVCItemChangesets -collectionUrl $collectionUrl -personalAccessToken $personalAccessToken -path $item.path -fileName
+            foreach ($changeset in $changesets) {
+                # The fact the file participated in changeset doesn't mean it's size has changed. (eg: deletion), but its a fair approximantion
+                $itemSize = Get-TFVCItemSize -collectionUrl $collectionUrl -personalAccessToken $personalAccessToken -path $item.path -fileName $item.fileName -version $changeset.changesetId
+                $binarySize = $binarySize + $itemSize
+                $binaryRevisions++;
+
+            }
             $binarySize = $binarySize + $item.size
             $repoSize = $repoSize + $item.size
+
         }
-        else #text file
-        {
+        else {
+            #text file
             $repoSize = $repoSize + $item.size
         }
     }
 
-    return $repoSize, $binarySize
+    Write-Host "   TFVC repoSize=$repoSize binarySize=$binarySize binaryFiles=$binaryFiles binaryRevisions=$binaryRevisions"
+
+    return $repoSize, $binarySize, $binaryFiles, $binaryRevisions
 }
 
 function Get-TFVCItemChangesets {
@@ -137,11 +157,13 @@ function Get-TFVCItemChangesets {
         [string]$collectionUrl,
         [string]$personalAccessToken,
         [string]$path
-     #   [string]$fileName,
-     #   [string]$version
+        #   [string]$fileName,
+        #   [string]$version
     )
 
-    $uri = "$($collectionUrl)/_apis/tfvc/changesets?searchCriteria.itemPath=$($path)&recursionLevel=none&api-version=5.1"
+    $encodedPath = [System.Web.HTTPUtility]::UrlEncode($path)
+
+    $uri = "$($collectionUrl)/_apis/tfvc/changesets?searchCriteria.itemPath=$($encodedPath)&recursionLevel=none&api-version=5.1"
 
     $changesets = Invoke-RestCommand -uri $uri -commandType "GET" -personalAccessToken $personalAccessToken
 
@@ -154,20 +176,25 @@ function Get-TFVCItemsize {
         [string]$collectionUrl,
         [string]$personalAccessToken,
         [string]$path,
-     #   [string]$fileName,
+        #   [string]$fileName,
         [string]$version
     )
 
-    $uri = "$($collectionUrl)/_apis/tfvc/items?searchCriteria.itemPath=$($path)&versionDescriptor.version=$($version)&versionDescriptor.versionType=change&api-version=5.1"
+    # Ideally we would call this https://docs.microsoft.com/en-us/rest/api/azure/devops/tfvc/items/get?view=azure-devops-rest-5.1#tfvcitem API with HEAD just to get the size
+    # Alas HEAD is not supported :(
+
+    $encodedPath = [System.Web.HTTPUtility]::UrlEncode($path)
+
+    $uri = "$($collectionUrl)/_apis/tfvc/items?scopePath=$($encodedPath)&versionDescriptor.version=$($version)&versionDescriptor.versionType=changeset&api-version=5.1"
 
     $item = Invoke-RestCommand -uri $uri -commandType "GET" -personalAccessToken $personalAccessToken
 
     return $item.size
 }
 
-#$CollectionUrl = "https://dev.azure.com/"
-#$PersonalAccessToken = ""
+# $CollectionUrl = 
 
+# $PersonalAccessToken = 
 
 $CollectionUrl = $CollectionUrl.TrimEnd("/")
 
@@ -177,31 +204,51 @@ $reposList = New-Object System.Collections.ArrayList($null)
 
 $projects = Get-Projects -collectionUrl $CollectionUrl -personalAccessToken $PersonalAccessToken
 
-foreach($project in $projects)
-{
-    $repos = Get-GitRepos -collectionUrl $CollectionUrl -projectName $Project.Name -personalAccessToken $PersonalAccessToken
-    foreach($repo in $repos)
-    {    
-     $reposList.Add([PSCustomObject]@{
-        Project = $($project.Name)
-        OldGitRepoName = $($repo.Name)
-        OldGitRepoSize = $($repo.size)
-        OldGitUri = $($repo.RemoteUrl)
-    }) | Out-Null
+foreach ($project in $projects) {
+    $projectName = $Project.Name
+
+    Write-Output "Project $projectName"
+
+    $repos = Get-GitRepos -collectionUrl $CollectionUrl -projectName $projectName -personalAccessToken $PersonalAccessToken
+
+    foreach ($repo in $repos) {    
+
+        Write-Output "   Repo $($repo.Name)"
+     
+        $reposList.Add([PSCustomObject]@{
+                Project              = $($project.Name)
+                Repo                 = $($repo.Name)
+                RepoSize             = $($repo.size)
+                Uri                  = $($repo.RemoteUrl)
+                BinaryFiles          = ""
+                BinaryFilesRevisions = ""
+            }) | Out-Null
     } 
-}
-$repoSizes = Get-TFVCRepoSize -collectionUrl $CollectionUrl -projectName $Project.Name -personalAccessToken $PersonalAccessToken
     
-$reposList.Add([PSCustomObject]@{
-    Project = "TFVC"
-    OldGitRepoName = "$/"
-    OldGitRepoSize = $($repoSizes[0])
-}) | Out-Null
+    Write-Output "   TFCV"
 
-$reposList.Add([PSCustomObject]@{
-    Project = "TFVCBinaries"
-    OldGitRepoName = "$/"
-    OldGitRepoSize = $($repoSizes[1])
-}) | Out-Null
+    $repoSizes = Get-TFVCRepoSize -collectionUrl $CollectionUrl -projectName $projectName -personalAccessToken $PersonalAccessToken
+    
+    if ($null -ne $repoSizes) {
 
-$reposList | Export-Csv ADORepos-$($organizationName)-$($ProjectName).csv -NoTypeInformation
+        $reposList.Add([PSCustomObject]@{
+                Project              = "$projectName TFVC"
+                Repo                 = "$/projectName"
+                RepoSize             = $($repoSizes[0])
+                BinaryFiles          = ""
+                BinaryFilesRevisions = ""
+            }) | Out-Null
+
+        $reposList.Add([PSCustomObject]@{
+                Project              = "$projectName TFVCBinaries"
+                Repo                 = "$/projectName"
+                RepoSize             = $($repoSizes[1])
+                BinaryFiles          = $($repoSizes[2])
+                BinaryFilesRevisions = $($repoSizes[3])
+            }) | Out-Null
+    }
+
+}
+
+
+$reposList | Export-Csv ADORepos-$($organizationName).csv -NoTypeInformation
