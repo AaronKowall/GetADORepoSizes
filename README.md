@@ -6,9 +6,7 @@ Instructions:
 Create an ADO Personal Access Token we will use in the script.  Create with “full access” as we will delete later. Please be sure to save the PAT (string of text) as you cannot get it again and will need to create a new one if you do not.
 https://docs.microsoft.com/en-us/azure/devops/organizations/accounts/use-personal-access-tokens-to-authenticate?view=tfs-2017&tabs=preview-page#create-personal-access-tokens-to-authenticate-access
 
- 
-
-Rename the extension of the .txt file attached to .ps1 (turn it into a PowerShell file)
+Download the powershell file from this repo.
 Open a PowerShell command window
 Run the following command (insert your ADO Org URL and the PAT created above)
 .\Get-ADORepoSizes.ps1 -CollectionUrl https://YourUrl -PersonalAccessToken yourpat
