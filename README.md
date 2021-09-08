@@ -13,7 +13,7 @@ Run the following command (insert your ADO Org URL and the PAT created above)
 
  
 
-Example: .\Get-ADORepoSizes.ps1 -CollectionUrl https://dev.azure.com/mseng -PersonalAccessToken aqnnj7ddt4vax34mzgzwgdkxv7de7xd5djeeflzvibieja5liyaa
+Example: .\Get-ADORepoSizes.ps1 -CollectionUrl https://dev.azure.com/AaronKowall -PersonalAccessToken aqnnj7ddt4vax34mzgzwgdkxv7de7xd5djeeflzvibieja5liyaa
 
 That ‘should’ create a file in the same directory as the .ps1 file named “ADORepos-youcollection-.csv”
 
